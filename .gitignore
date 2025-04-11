@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+venv/
+
+# Node.js
+node_modules/
+dist/
+
+# VSCode
+.vscode/
+
+# Docker
+*.log
+
+# Environment files
+.env
