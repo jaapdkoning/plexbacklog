@@ -3,6 +3,8 @@ FROM node:20 AS frontend
 WORKDIR /app
 COPY frontend ./frontend
 RUN cd frontend && npm install && npm run build
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # === BACKEND RUNTIME ===
 FROM python:3.11-slim
