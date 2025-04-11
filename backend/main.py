@@ -17,7 +17,8 @@ LIDARR_URL = os.getenv("LIDARR_URL")
 
 # Standaard instellingen voor alle systemen (pas aan indien nodig)
 DEFAULT_QUALITY_PROFILE = 1
-DEFAULT_ROOT_FOLDER = "/media"
+DEFAULT_ROOT_FOLDER = "/mediafolder/Movies"
+
 
 class SearchRequest(BaseModel):
     type: str  # radarr, sonarr, lidarr
