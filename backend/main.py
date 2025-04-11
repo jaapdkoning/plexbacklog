@@ -1,126 +1,107 @@
-# media-request-app: basisopzet met FastAPI backend en Vue frontend
-
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-import httpx
 import os
+import uvicorn
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+import httpx
+from dotenv import load_dotenv
 
-app = FastAPI()
+# Load environment variables
+load_dotenv()
 
-RADARR_API = os.getenv("RADARR_API")
+# Environment settings
 RADARR_URL = os.getenv("RADARR_URL")
-SONARR_API = os.getenv("SONARR_API")
+RADARR_API_KEY = os.getenv("RADARR_API_KEY")
+RADARR_ROOT_FOLDER_ID = int(os.getenv("RADARR_ROOT_FOLDER_ID", 1))
+RADARR_QUALITY_PROFILE_ID = int(os.getenv("RADARR_QUALITY_PROFILE_ID", 1))
+
 SONARR_URL = os.getenv("SONARR_URL")
-LIDARR_API = os.getenv("LIDARR_API")
+SONARR_API_KEY = os.getenv("SONARR_API_KEY")
+SONARR_ROOT_FOLDER_ID = int(os.getenv("SONARR_ROOT_FOLDER_ID", 2))
+SONARR_QUALITY_PROFILE_ID = int(os.getenv("SONARR_QUALITY_PROFILE_ID", 6))
+SONARR_LANGUAGE_PROFILE_ID = int(os.getenv("SONARR_LANGUAGE_PROFILE_ID", 1))
+
 LIDARR_URL = os.getenv("LIDARR_URL")
+LIDARR_API_KEY = os.getenv("LIDARR_API_KEY")
+LIDARR_ROOT_FOLDER_ID = int(os.getenv("LIDARR_ROOT_FOLDER_ID", 1))
+LIDARR_QUALITY_PROFILE_ID = int(os.getenv("LIDARR_QUALITY_PROFILE_ID", 2))
+LIDARR_METADATA_PROFILE_ID = int(os.getenv("LIDARR_METADATA_PROFILE_ID", 1))
 
-# Standaard instellingen voor alle systemen (pas aan indien nodig)
-DEFAULT_QUALITY_PROFILE = 1
-DEFAULT_ROOT_FOLDER = "/mediafolder/Movies"
+# Setup FastAPI
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
-class SearchRequest(BaseModel):
-    type: str  # radarr, sonarr, lidarr
-    query: str
-
-class AddRequest(BaseModel):
-    type: str
-    payload: dict
-
-@app.get("/api")
-def read_root():
-    return {"message": "PlexBacklog draait!"}
-
-@app.post("/api/search")
-async def search(req: SearchRequest):
-    base_url, api = get_base_url(req.type), get_api_key(req.type)
-    if not base_url or not api:
-        raise HTTPException(status_code=400, detail="Invalid type")
-
-    endpoint = {
-        "radarr": "movie/lookup",
-        "sonarr": "series/lookup",
-        "lidarr": "artist/lookup"
-    }.get(req.type)
-
-    if not endpoint:
-        raise HTTPException(status_code=400, detail="Unknown type")
-
+@app.post("/add")
+async def add(request: Request, kind: str = Form(...), title: str = Form(...)):
     async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"{base_url}/api/v3/{endpoint}",
-            params={"term": req.query},
-            headers={"X-Api-Key": api},
-            timeout=10
-        )
-        try:
-            return r.json()
-        except Exception:
-            raise HTTPException(status_code=502, detail="Invalid response from downstream service")
+        if kind == "movie":
+            response = await client.post(
+                f"{RADARR_URL}/api/v3/movie",
+                headers={"X-Api-Key": RADARR_API_KEY},
+                json={
+                    "title": title,
+                    "qualityProfileId": RADARR_QUALITY_PROFILE_ID,
+                    "rootFolderPath": "/mediafolder/Movies",
+                    "monitored": True,
+                    "addOptions": {"searchForMovie": True}
+                },
+            )
+        elif kind == "series":
+            response = await client.post(
+                f"{SONARR_URL}/api/v3/series/lookup?term={title}",
+                headers={"X-Api-Key": SONARR_API_KEY}
+            )
+            data = response.json()
+            if data:
+                series = data[0]
+                payload = {
+                    "title": series["title"],
+                    "qualityProfileId": SONARR_QUALITY_PROFILE_ID,
+                    "languageProfileId": SONARR_LANGUAGE_PROFILE_ID,
+                    "rootFolderPath": "/mediafolder/Series",
+                    "tvdbId": series["tvdbId"],
+                    "monitored": True,
+                    "addOptions": {"searchForMissingEpisodes": True},
+                    "seasons": [
+                        {"seasonNumber": s["seasonNumber"], "monitored": True}
+                        for s in series.get("seasons", [])
+                    ]
+                }
+                await client.post(
+                    f"{SONARR_URL}/api/v3/series",
+                    headers={"X-Api-Key": SONARR_API_KEY},
+                    json=payload
+                )
+        elif kind == "music":
+            response = await client.get(
+                f"{LIDARR_URL}/api/v1/artist/lookup?term={title}",
+                headers={"X-Api-Key": LIDARR_API_KEY}
+            )
+            data = response.json()
+            if data:
+                artist = data[0]
+                payload = {
+                    "artistName": artist["artistName"],
+                    "qualityProfileId": LIDARR_QUALITY_PROFILE_ID,
+                    "metadataProfileId": LIDARR_METADATA_PROFILE_ID,
+                    "rootFolderPath": "/music",
+                    "foreignArtistId": artist["foreignArtistId"],
+                    "monitored": True,
+                    "addOptions": {"searchForNewAlbum": True}
+                }
+                await client.post(
+                    f"{LIDARR_URL}/api/v1/artist",
+                    headers={"X-Api-Key": LIDARR_API_KEY},
+                    json=payload
+                )
 
-@app.post("/api/add")
-async def add(req: AddRequest):
-    base_url, api = get_base_url(req.type), get_api_key(req.type)
-    if not base_url or not api:
-        raise HTTPException(status_code=400, detail="Invalid type")
+    return RedirectResponse("/", status_code=303)
 
-    endpoint = get_endpoint(req.type)
-    payload = build_payload(req.type, req.payload)
-
-    async with httpx.AsyncClient() as client:
-        r = await client.post(
-            f"{base_url}/api/v3/{endpoint}",
-            json=payload,
-            headers={"X-Api-Key": api},
-            timeout=10
-        )
-        try:
-            return r.json()
-        except Exception:
-            raise HTTPException(status_code=502, detail="Failed to add item")
-
-def build_payload(t, item):
-    if t == "radarr":
-        return {
-            "title": item.get("title"),
-            "tmdbId": item.get("tmdbId"),
-            "qualityProfileId": DEFAULT_QUALITY_PROFILE,
-            "rootFolderPath": DEFAULT_ROOT_FOLDER,
-            "monitored": True,
-            "addOptions": {"searchForMovie": True}
-        }
-    elif t == "sonarr":
-        return {
-            "title": item.get("title"),
-            "tvdbId": item.get("tvdbId"),
-            "qualityProfileId": DEFAULT_QUALITY_PROFILE,
-            "rootFolderPath": DEFAULT_ROOT_FOLDER,
-            "monitored": True,
-            "addOptions": {"searchForMissingEpisodes": True},
-            "seasons": item.get("seasons", [])
-        }
-    elif t == "lidarr":
-        return {
-            "artistName": item.get("artistName"),
-            "foreignArtistId": item.get("foreignArtistId"),
-            "qualityProfileId": DEFAULT_QUALITY_PROFILE,
-            "rootFolderPath": DEFAULT_ROOT_FOLDER,
-            "monitored": True,
-            "addOptions": {"searchForMissingAlbums": True},
-            "albums": item.get("albums", [])
-        }
-    else:
-        raise ValueError("Unsupported type")
-
-def get_base_url(t):
-    return {"radarr": RADARR_URL, "sonarr": SONARR_URL, "lidarr": LIDARR_URL}.get(t)
-
-def get_api_key(t):
-    return {"radarr": RADARR_API, "sonarr": SONARR_API, "lidarr": LIDARR_API}.get(t)
-
-def get_endpoint(t):
-    return {"radarr": "movie", "sonarr": "series", "lidarr": "artist"}.get(t)
-
-# Serve frontend static files AFTER the API routes
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
