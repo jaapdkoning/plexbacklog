@@ -15,6 +15,10 @@ SONARR_URL = os.getenv("SONARR_URL")
 LIDARR_API = os.getenv("LIDARR_API")
 LIDARR_URL = os.getenv("LIDARR_URL")
 
+# Standaard instellingen voor alle systemen (pas aan indien nodig)
+DEFAULT_QUALITY_PROFILE = 1
+DEFAULT_ROOT_FOLDER = "/media"
+
 class SearchRequest(BaseModel):
     type: str  # radarr, sonarr, lidarr
     query: str
@@ -60,9 +64,53 @@ async def add(req: AddRequest):
     if not base_url or not api:
         raise HTTPException(status_code=400, detail="Invalid type")
 
+    endpoint = get_endpoint(req.type)
+    payload = build_payload(req.type, req.payload)
+
     async with httpx.AsyncClient() as client:
-        r = await client.post(f"{base_url}/api/v3/{get_endpoint(req.type)}", json=req.payload, headers={"X-Api-Key": api})
-        return r.json()
+        r = await client.post(
+            f"{base_url}/api/v3/{endpoint}",
+            json=payload,
+            headers={"X-Api-Key": api},
+            timeout=10
+        )
+        try:
+            return r.json()
+        except Exception:
+            raise HTTPException(status_code=502, detail="Failed to add item")
+
+def build_payload(t, item):
+    if t == "radarr":
+        return {
+            "title": item.get("title"),
+            "tmdbId": item.get("tmdbId"),
+            "qualityProfileId": DEFAULT_QUALITY_PROFILE,
+            "rootFolderPath": DEFAULT_ROOT_FOLDER,
+            "monitored": True,
+            "addOptions": {"searchForMovie": True}
+        }
+    elif t == "sonarr":
+        return {
+            "title": item.get("title"),
+            "tvdbId": item.get("tvdbId"),
+            "qualityProfileId": DEFAULT_QUALITY_PROFILE,
+            "rootFolderPath": DEFAULT_ROOT_FOLDER,
+            "monitored": True,
+            "addOptions": {"searchForMissingEpisodes": True},
+            "seasons": item.get("seasons", [])
+        }
+    elif t == "lidarr":
+        return {
+            "artistName": item.get("artistName"),
+            "foreignArtistId": item.get("foreignArtistId"),
+            "qualityProfileId": DEFAULT_QUALITY_PROFILE,
+            "rootFolderPath": DEFAULT_ROOT_FOLDER,
+            "monitored": True,
+            "addOptions": {"searchForMissingAlbums": True},
+            "albums": item.get("albums", [])
+        }
+    else:
+        raise ValueError("Unsupported type")
 
 def get_base_url(t):
     return {"radarr": RADARR_URL, "sonarr": SONARR_URL, "lidarr": LIDARR_URL}.get(t)
