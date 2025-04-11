@@ -1,7 +1,5 @@
 # media-request-app: basisopzet met FastAPI backend en Vue frontend
 
-# === BACKEND: FastAPI ===
-# main.py
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -10,14 +8,6 @@ import httpx
 import os
 
 app = FastAPI()
-
-# Serve frontend static files
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
-# Optional healthcheck route
-@app.get("/api")
-def read_root():
-    return {"message": "PlexBacklog draait!"}
 
 RADARR_API = os.getenv("RADARR_API")
 RADARR_URL = os.getenv("RADARR_URL")
@@ -33,6 +23,10 @@ class SearchRequest(BaseModel):
 class AddRequest(BaseModel):
     type: str
     payload: dict
+
+@app.get("/api")
+def read_root():
+    return {"message": "PlexBacklog draait!"}
 
 @app.post("/api/search")
 async def search(req: SearchRequest):
@@ -62,3 +56,6 @@ def get_api_key(t):
 
 def get_endpoint(t):
     return {"radarr": "movie", "sonarr": "series", "lidarr": "artist"}.get(t)
+
+# Serve frontend static files AFTER the API routes
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
