@@ -2,7 +2,6 @@
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import httpx
 import os
@@ -34,9 +33,26 @@ async def search(req: SearchRequest):
     if not base_url or not api:
         raise HTTPException(status_code=400, detail="Invalid type")
 
+    endpoint = {
+        "radarr": "movie/lookup",
+        "sonarr": "series/lookup",
+        "lidarr": "artist/lookup"
+    }.get(req.type)
+
+    if not endpoint:
+        raise HTTPException(status_code=400, detail="Unknown type")
+
     async with httpx.AsyncClient() as client:
-        r = await client.get(f"{base_url}/api/v3/search", params={"term": req.query}, headers={"X-Api-Key": api})
-        return r.json()
+        r = await client.get(
+            f"{base_url}/api/v3/{endpoint}",
+            params={"term": req.query},
+            headers={"X-Api-Key": api},
+            timeout=10
+        )
+        try:
+            return r.json()
+        except Exception:
+            raise HTTPException(status_code=502, detail="Invalid response from downstream service")
 
 @app.post("/api/add")
 async def add(req: AddRequest):
