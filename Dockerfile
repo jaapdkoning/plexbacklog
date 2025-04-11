@@ -12,15 +12,15 @@ RUN apt-get update && apt-get install -y gcc libffi-dev libssl-dev && \
 
 WORKDIR /app
 
-# Kopieer backend en templates correct
-COPY backend ./backend
-COPY backend/templates ./backend/templates
+# Backend en templates
+COPY backend /app/backend
+COPY backend/templates /app/templates
 
-# Kopieer requirements en installeer
+# requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Kopieer frontend build naar static folder
+# Static files vanuit frontend
 COPY --from=frontend /app/frontend/dist /app/static
 
 ENV PYTHONUNBUFFERED=1
